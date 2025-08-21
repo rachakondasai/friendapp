@@ -1,0 +1,29 @@
+*{box-sizing:border-box} body{margin:0;font:16px/1.4 system-ui,Segoe UI,Roboto;color:#e5e7eb;background:#0b1224}
+.card{max-width:760px;margin:8vh auto;padding:24px;border:1px solid #334155;border-radius:16px;background:#111827}
+.card h1{margin:0 0 16px}
+.card input{width:100%;margin:8px 0;padding:12px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#e5e7eb}
+.card button{width:100%;padding:12px;border:0;border-radius:10px;background:#10b981;color:#0b1224;font-weight:700;margin-top:8px;cursor:pointer}
+.right{float:right;font-weight:600;color:#93c5fd;text-decoration:none}
+.msg{min-height:22px;color:#fca5a5;margin-top:8px}
+
+.layout{display:grid;grid-template-columns:280px 1fr;gap:20px;padding:24px}
+.side{border:1px solid #334155;border-radius:16px;background:#111827;padding:16px}
+.me{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.avatar{width:48px;height:48px;border-radius:999px;border:1px solid #334155}
+.avatar.sm{width:32px;height:32px}
+.bold{font-weight:700}
+.muted{opacity:.7;font-size:14px}
+.side input,.side select{width:100%;margin:6px 0;padding:10px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#e5e7eb}
+.side button{width:100%;padding:10px;border-radius:10px;border:0;cursor:pointer;margin-top:8px}
+.side .danger{background:#ef4444;color:#fff}
+
+.main{border:1px solid #334155;border-radius:16px;background:#0f172a;padding:16px}
+.bar{display:flex;gap:10px;margin:10px 0}
+.bar button{padding:10px 14px;border-radius:10px;border:0;background:#2563eb;color:#fff;cursor:pointer}
+.bar .danger{background:#ef4444}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;align-items:center;gap:10px;background:#111827;border:1px solid #334155;padding:10px;border-radius:12px}
+.row .flex1{flex:1}
+.call.hidden{display:none}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+video{width:100%;aspect-ratio:16/9;background:#000;border-radius:12px}

@@ -1,68 +1,59 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Dashboard — FriendApp</title>
-  <link rel="stylesheet" href="/ui.css"/>
+  <meta charset="utf-8" />
+  <title>Dashboard · FriendApp</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
-<body class="wrap">
-  <div class="card">
-    <header class="row">
-      <h2>👋 FriendApp — Dashboard</h2>
-      <nav>
-        <button id="btn_logout" class="btn danger">Logout</button>
-      </nav>
-    </header>
-
-    <section>
-      <h3>Preferences</h3>
-      <div class="grid">
-        <select id="gender">
-          <option value="">Gender</option>
-          <option>male</option>
-          <option>female</option>
-        </select>
-        <input id="language" placeholder="Language e.g. Telugu"/>
-        <input id="location"  placeholder="City (optional)"/>
-        <button id="save" class="btn">Save</button>
-        <span id="save_msg" class="muted"></span>
-      </div>
-    </section>
-
-    <section class="row mt">
-      <div>
-        <h3>Start a call</h3>
-        <div class="row gap">
-          <button id="rand_audio" class="btn">🎤 Random Audio</button>
-          <button id="rand_video" class="btn success">📹 Random Video</button>
-          <button id="cancel" class="btn">Cancel</button>
+<body>
+  <div class="layout">
+    <aside class="side">
+      <div class="me">
+        <img id="me_avatar" class="avatar" />
+        <div>
+          <div id="me_name" class="bold"></div>
+          <div id="me_phone" class="muted"></div>
         </div>
-        <p id="status" class="muted"></p>
       </div>
+      <h3>Settings</h3>
+      <select id="gender">
+        <option value="">Select gender</option>
+        <option>Male</option>
+        <option>Female</option>
+      </select>
+      <input id="language" placeholder="Language (e.g., Telugu)" />
+      <input id="location" placeholder="Location (optional)" />
+      <button id="save">Save</button>
+      <button id="logout" class="danger">Logout</button>
+    </aside>
 
-      <div class="grow">
-        <h3>Online users</h3>
-        <div id="online" class="list"></div>
-        <p class="muted small">(tap a user to call video)</p>
+    <main class="main">
+      <h1>👋 FriendApp</h1>
+      <div class="bar">
+        <button id="randAudio">🎤 Random Audio</button>
+        <button id="randVideo">📹 Random Video</button>
+        <button id="cancel">Cancel</button>
       </div>
-    </section>
+      <p id="status" class="muted"></p>
 
-    <section id="call_box" class="hidden">
-      <h3 id="call_title">In call</h3>
-      <div class="grid">
-        <video id="localVideo" autoplay playsinline muted class="video"></video>
-        <video id="remoteVideo" autoplay playsinline class="video"></video>
+      <h3>Online users <span class="muted">(tap to call)</span></h3>
+      <div id="online" class="list"></div>
+
+      <section id="call" class="call hidden">
+        <div class="grid">
+          <video id="localVideo" autoplay playsinline muted></video>
+          <video id="remoteVideo" autoplay playsinline></video>
+        </div>
         <audio id="remoteAudio" autoplay></audio>
-      </div>
-      <div class="row gap mt">
-        <button id="hangup" class="btn danger">Hang up</button>
-        <span id="timer" class="muted"></span>
-      </div>
-    </section>
+        <div class="bar">
+          <button id="hangup" class="danger">Hang up</button>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script type="module" src="/front.js"></script>
+  <script src="/dash.js"></script>
 </body>
 </html>
