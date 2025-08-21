@@ -12,6 +12,6 @@ app.use(express.static(path.join(__dirname, "public")));
 // Health check
 app.get("/healthz", (req, res) => res.send("ok"));
 
-server.listen(process.env.PORT || 3000, () =>
+server.listen(process.env.PORT || 3000, "0.0.0.0", () =>
   console.log("FriendApp running on port " + (process.env.PORT || 3000))
 );
