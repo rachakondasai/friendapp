@@ -1,0 +1,15 @@
+# render.yaml — place this at the root of rachakondasai/friendapp
+services:
+  - type: web
+    name: friendapp
+    env: node
+    plan: free
+    region: singapore            # same region you used before
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+    healthCheckPath: /healthz    # your server exposes this
+    envVars:
+      - key: NODE_ENV
+        value: production
+    # Render sets PORT automatically; your server must use process.env.PORT
