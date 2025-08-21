@@ -1,4 +1,4 @@
-const CACHE_NAME = "friendapp-v2";        // bump on each deploy
+const CACHE_NAME = "friendapp-v3";        // bump on each deploy
 const CORE = ["/", "/login", "/signup", "/dashboard", "/settings", "/app.css", "/ui.js"];
 
 self.addEventListener("install", e => {
