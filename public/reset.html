@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>FriendApp — Reset Password</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/ui.css">
+</head>
+<body class="bg">
+  <main class="card w-3xl">
+    <header class="card-h"><h1>🔁 Reset password</h1><a href="/login.html" class="link">Back to login</a></header>
+    <section class="grid2">
+      <input id="phone" placeholder="Phone" class="in col2">
+      <button id="btn_send" class="btn btn-blue">Send code</button>
+      <div id="sent" class="muted"></div>
+
+      <input id="code" placeholder="Code" class="in">
+      <input id="newpass" placeholder="New password" type="password" class="in">
+      <button id="btn_confirm" class="btn btn-green col2">Confirm reset</button>
+      <div id="status" class="err col2"></div>
+    </section>
+  </main>
+  <script>
+    const $=id=>document.getElementById(id);
+    const api=async(p,b)=>{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error((await r.json()).error||'Failed');return r.json();};
+    $('btn_send').onclick=async()=>{
+      $('status').textContent='';$('sent').textContent='';
+      try{
+        const r=await api('/api/request-reset',{phone:$('phone').value.trim()});
+        $('sent').textContent='Code sent (demo): '+r.code;
+      }catch(e){$('status').textContent=e.message;}
+    };
+    $('btn_confirm').onclick=async()=>{
+      $('status').textContent='';
+      try{
+        await api('/api/confirm-reset',{phone:$('phone').value.trim(), code:$('code').value.trim(), newPassword:$('newpass').value});
+        location.href='/login.html';
+      }catch(e){$('status').textContent=e.message;}
+    };
+  </script>
+</body>
+</html>

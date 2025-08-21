@@ -1,52 +1,89 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/app.css"/>
+  <meta charset="utf-8"/>
   <title>FriendApp — Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/ui.css">
 </head>
-<body>
-<div class="container">
-  <div class="card">
-    <div class="header">
-      <div class="title">👋 FriendApp</div>
-      <div><a href="/settings">Settings</a> · <a href="#" id="logout">Logout</a></div>
-    </div>
-
-    <div class="row mb-2">
-      <button id="btn_audio" class="btn">🎤 Random Audio</button>
-      <button id="btn_video" class="btn green">📹 Random Video</button>
-      <button id="btn_cancel" class="btn gray">Cancel</button>
-    </div>
-    <div id="status" class="mb-2">Waiting…</div>
-
-    <div class="grid-2">
-      <div class="card">
-        <div><b>Online users</b> (tap to call)</div>
-        <div id="online" class="list mt-2"></div>
-      </div>
-
-      <div class="card">
-        <div class="center"><b>Call</b> <span id="timer">00:00</span></div>
-        <div class="mt-2">
-          <video id="localVideo" autoplay playsinline muted style="width:100%;border-radius:12px;background:#000"></video>
-          <video id="remoteVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000" class="mt-2"></video>
-          <audio id="remoteAudio" autoplay></audio>
+<body class="bg">
+  <main class="row gap">
+    <aside class="card w-80">
+      <header class="card-h"><h2>👤 Me</h2></header>
+      <section class="p">
+        <img id="me_avatar" class="avatar">
+        <div id="me_name" class="mt-2"></div>
+        <div id="me_phone" class="muted"></div>
+        <div class="mt-4 grid1">
+          <a class="btn" href="/setup.html">Edit profile</a>
+          <button id="logout" class="btn btn-rose">Logout</button>
         </div>
-        <div class="row mt-3">
-          <button id="btn_mic" class="btn gray grow">Mic</button>
-          <button id="btn_cam" class="btn gray grow">Camera</button>
-          <button id="btn_hang" class="btn red grow">Hang Up</button>
+      </section>
+    </aside>
+
+    <section class="card flex-1">
+      <header class="card-h"><h1>👋 FriendApp</h1></header>
+      <section class="p">
+        <div class="row gap">
+          <button id="btn_audio" class="btn btn-blue">🎤 Random Audio</button>
+          <button id="btn_video" class="btn btn-green">📹 Random Video</button>
+          <button id="btn_cancel" class="btn">Cancel</button>
         </div>
-      </div>
-    </div>
-  </div>
-</div>
+        <div id="status" class="muted mt-2"></div>
 
-<audio id="tone_out" src="/sounds/ring-out.mp3" preload="auto"></audio>
-<audio id="tone_in"  src="/sounds/ring-in.mp3" preload="auto" loop></audio>
+        <h3 class="mt-6">🟢 Online users <span class="muted">(tap to call)</span></h3>
+        <div id="online" class="grid3 mt-2"></div>
+      </section>
+    </section>
+  </main>
 
-<script src="/socket.io/socket.io.js"></script>
-<script type="module" src="/call.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const $=id=>document.getElementById(id);
+    const token=localStorage.getItem('fa_token'); if(!token) location.href='/login.html';
+
+    const api=async(p,b)=>{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error((await r.json()).error||'Failed');return r.json();};
+    (async()=>{
+      const me=await api('/api/me',{token});
+      $('me_name').textContent=me.name;
+      $('me_phone').textContent=me.phone;
+      $('me_avatar').src=me.profile?.avatar||'';
+      if(!me.profile?.gender || !me.profile?.language) location.href='/setup.html';
+    })().catch(()=>location.href='/login.html');
+
+    const socket = io();
+    socket.on('connect', ()=> socket.emit('auth',{token}));
+    socket.on('auth_ok', ()=> socket.emit('presence_get'));
+
+    socket.on('presence', (list)=>{
+      const box=$('online'); box.innerHTML='';
+      list.filter(u=>!!u.free).forEach(u=>{
+        const div=document.createElement('button');
+        div.className='tile';
+        div.innerHTML=`<img src="${u.avatar}" class="avatar-sm"><div class="grow"><div>${u.name}</div><div class="muted">${u.prefs.language} • ${u.prefs.gender}</div></div><span class="pill">Call</span>`;
+        div.onclick=()=> socket.emit('call_user',{targetToken:u.token,mode:'video'});
+        box.appendChild(div);
+      });
+    });
+
+    // call UX (ringing → accepted handled in your existing app.js if you keep it)
+    socket.on('outgoing_call', ({mode,to})=>{
+      $('status').textContent=`Calling ${to.name} (${mode})…`;
+    });
+    socket.on('incoming_call', ({mode,from})=>{
+      $('status').textContent=`Incoming ${mode} call from ${from.name}… open your call UI to accept`;
+      // Here you would show your call modal and Accept/Decline buttons,
+      // then emit 'call_accept' or 'call_decline'
+    });
+    socket.on('call_timeout', ()=> $('status').textContent='No answer.');
+    socket.on('call_missed',  ()=> $('status').textContent='Missed call.');
+    socket.on('call_declined',()=> $('status').textContent='Declined.');
+    socket.on('call_accepted',()=> $('status').textContent='Call connected!');
+
+    $('btn_audio').onclick=()=>{ $('status').textContent='Searching audio match…'; socket.emit('find_match',{mode:'audio'}); };
+    $('btn_video').onclick=()=>{ $('status').textContent='Searching video match…'; socket.emit('find_match',{mode:'video'}); };
+    $('btn_cancel').onclick=()=> socket.emit('cancel_find',{mode:'audio'}) || socket.emit('cancel_find',{mode:'video'});
+    $('logout').onclick=()=>{ localStorage.removeItem('fa_token'); location.href='/login.html'; };
+  </script>
 </body>
 </html>
