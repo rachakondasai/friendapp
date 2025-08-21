@@ -1,114 +1,79 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8"/>
   <title>Dashboard · FriendApp</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="/style.css" />
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="stylesheet" href="/style.css"/>
 </head>
 <body>
-  <header class="bar">
-    <div class="brand">👋 FriendApp</div>
-    <nav class="right">
-      <button id="logout" class="danger">Logout</button>
-    </nav>
-  </header>
+<header class="bar">
+  <div class="brand">🫶 FriendApp — Dashboard</div>
+  <nav class="right">
+    <span id="coins" class="badge">Coins: 0</span>
+    <button id="btnRecharge" class="small primary">Recharge</button>
+    <button id="btnLogout" class="small ghost">Logout</button>
+  </nav>
+</header>
 
-  <main class="wrap grid-2">
-    <!-- Left: profile + prefs + wallet -->
-    <section class="card">
-      <div class="row">
-        <img id="me_avatar" class="avatar" src="/avatars/neutral.png" alt="">
-        <div>
-          <div id="me_name" class="big">User</div>
-          <div id="me_phone" class="muted">-</div>
-          <div class="muted">Coins: <span id="me_coins">0</span></div>
-        </div>
-      </div>
+<main class="wrap grid-2 gap">
+  <section class="card">
+    <h3>Online users</h3>
+    <div id="online" class="list"></div>
+  </section>
 
-      <h3>Preferences</h3>
-      <div class="grid-3 gap">
-        <select id="gender">
-          <option value="">Select gender</option>
-          <option value="male">Male ♂️</option>
-          <option value="female">Female ♀️</option>
-        </select>
-        <input id="language" placeholder="Language (e.g., Telugu)" />
-        <input id="location" placeholder="City / Location" />
-      </div>
-      <button id="save" class="primary">Save</button>
-      <div id="status" class="muted"></div>
+  <section class="card">
+    <h3>Random calls</h3>
+    <div class="row gap">
+      <button id="btnAudio" class="primary">🎤 Random Audio</button>
+      <button id="btnVideo" class="success">📹 Random Video</button>
+      <button id="btnCancel" class="ghost">Cancel</button>
+    </div>
+    <div id="status" class="muted mt"></div>
 
-      <div class="divider"></div>
-
-      <h3>Wallet</h3>
-      <div id="wallet_male" class="hide">
-        <div class="muted">Recharge packs (male only)</div>
-        <div class="grid-3 gap">
-          <button class="pack" data-pack="100">₹100 → 1000 coins</button>
-          <button class="pack" data-pack="200">₹200 → 2200 coins</button>
-          <button class="pack" data-pack="500">₹500 → 6000 coins</button>
-        </div>
-      </div>
-
-      <div id="wallet_female" class="hide">
-        <div class="muted">Redeem coins (female only)</div>
-        <input id="rd_amount" type="number" min="1" placeholder="Coins to redeem" />
-        <input id="rd_upi" placeholder="UPI id (name@bank)" />
-        <button id="redeem" class="success">Redeem</button>
-      </div>
-    </section>
-
-    <!-- Right: actions + online list + call area -->
-    <section class="card">
-      <h2>Dashboard</h2>
+    <div id="ring" class="hidden mt">
       <div class="row gap">
-        <button id="randAudio">🎤 Random Audio</button>
-        <button id="randVideo" class="success">📹 Random Video</button>
-        <button id="cancel" class="muted">Cancel</button>
+        <img id="ringAvatar" class="avatar" alt="">
+        <div id="ringText" class="muted"></div>
+      </div>
+      <div class="row gap mt">
+        <button id="accept" class="success">Accept</button>
+        <button id="decline" class="danger">Decline</button>
+        <button id="cancel" class="ghost">Cancel</button>
+      </div>
+    </div>
+
+    <div id="callBox" class="hidden mt">
+      <div class="row gap">
+        <img id="peerAvatar" class="avatar" alt="">
+        <span id="timer" class="badge">00:00</span>
+        <button id="mic" class="small">🎙️ Mute</button>
+        <button id="cam" class="small">📷 Cam Off</button>
+        <button id="hang" class="danger small">Hang Up</button>
+      </div>
+      <div class="row gap mt">
+        <video id="local" autoplay playsinline muted class="video"></video>
+        <video id="remote" autoplay playsinline class="video"></video>
+        <audio id="remoteAudio" autoplay></audio>
       </div>
 
-      <p class="muted" id="info">Waiting for partner…</p>
-
-      <h3>Online users <span class="muted">(tap to see)</span></h3>
-      <div id="online" class="list"></div>
-
-      <!-- In-call UI -->
-      <div id="call" class="hide">
-        <div class="center">
-          <div id="timer" class="timer">00:00</div>
+      <div class="chat mt">
+        <div id="chatLog" class="chat-log"></div>
+        <div class="row gap mt">
+          <input id="chatInput" placeholder="Type a message…">
+          <button id="chatSend" class="small">Send</button>
         </div>
-        <div class="grid-2 gap">
-          <div class="stack center">
-            <img id="me_pic" class="avatar xl" src="/avatars/neutral.png" alt="">
-            <div class="muted">You</div>
-          </div>
-          <div class="stack center">
-            <img id="peer_pic" class="avatar xl" src="/avatars/neutral.png" alt="">
-            <div id="peer_label" class="muted">Friend</div>
-          </div>
-        </div>
-
-        <div id="videoWrap" class="grid-2 gap">
-          <video id="localVideo" autoplay playsinline muted class="video"></video>
-          <video id="remoteVideo" autoplay playsinline class="video"></video>
-          <audio id="remoteAudio" autoplay></audio>
-        </div>
-
-        <div class="center">
-          <button id="hangup" class="danger">Hang Up</button>
-        </div>
-        <div id="summary" class="muted center"></div>
       </div>
-    </section>
-  </main>
+    </div>
+  </section>
 
-  <footer class="foot center">
-    App developed by <strong>RachakondaSai</strong> — All rights reserved •
-    Support: <a href="mailto:rsaiprasad039@gmail.com">rsaiprasad039@gmail.com</a>
-  </footer>
+  <section class="card span-2">
+    <h3>History</h3>
+    <div id="history" class="list"></div>
+  </section>
+</main>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/dash.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/dash.js" type="module"></script>
 </body>
 </html>

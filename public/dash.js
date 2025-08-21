@@ -1,209 +1,212 @@
+// dash.js
 const phone = localStorage.getItem("phone");
-const name  = localStorage.getItem("name");
-if (!phone) location.href="/login";
+if (!phone) location.href = "/login";
 
 const $ = id => document.getElementById(id);
+const api = async (p, b) => {
+  const r = await fetch(p, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(b || {})
+  });
+  if (!r.ok) throw new Error((await r.json()).error || "Request failed");
+  return r.json();
+};
 
-// Profile header
-$("me_name").textContent  = name || "User";
-$("me_phone").textContent = phone;
+let me = null, myPrefs = null;
+let socket = null, mode = null, roomId = null, pc = null, dc = null, localStream = null, timerId = null, startAt = 0;
+let micOn = true, camOn = true;
+let currentPeerAvatar = "";
 
-// Load me (emoji name + avatar + prefs + coins)
-(async ()=>{
-  try{
-    const r=await fetch("/api/me",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone})});
-    const j=await r.json();
-    $("me_avatar").src = j.profile.avatar;
-    $("me_name").textContent = j.profile.name;
-    $("me_coins").textContent = j.wallet?.coins ?? 0;
-    $("gender").value   = j.prefs.gender   || "";
-    $("language").value = j.prefs.language || "";
-    $("location").value = j.prefs.location || "";
+(async function boot() {
+  const m = await api("/api/me", { phone });
+  me = m.profile; myPrefs = m.prefs;
+  if (!myPrefs?.gender || !myPrefs?.language) { location.href = "/prefs"; return; }
+  $("coins").textContent = `Coins: ${me.coins || 0}`;
+  $("btnRecharge").style.display = (myPrefs.gender === "male") ? "inline-block" : "none";
 
-    // Wallet view gating
-    const g = (j.prefs.gender||"").toLowerCase();
-    if (g==="male"){ $("wallet_male").classList.remove("hide"); $("wallet_female").classList.add("hide"); }
-    else if (g==="female"){ $("wallet_female").classList.remove("hide"); $("wallet_male").classList.add("hide"); }
-  }catch{}
+  await refreshOnline();
+  await refreshHistory();
+
+  socket = io();
+  socket.on("connect", () => socket.emit("auth", { phone }));
+  socket.on("presence", () => refreshOnline());
+
+  socket.on("incoming_call", ({ roomId: rid, mode: m, from }) => {
+    roomId = rid; mode = m;
+    currentPeerAvatar = from?.avatar || "";
+    $("ringAvatar").src = currentPeerAvatar;
+    showRing(`Incoming ${mode} call from ${from?.name || from?.phone}`);
+    $("accept").onclick = () => socket.emit("call_accept", { roomId });
+    $("decline").onclick = () => socket.emit("call_decline", { roomId });
+  });
+
+  socket.on("outgoing_call", ({ roomId: rid, mode: m, to }) => {
+    roomId = rid; mode = m;
+    currentPeerAvatar = to?.avatar || "";
+    $("ringAvatar").src = currentPeerAvatar;
+    showRing(`Calling ${to?.name || to?.phone}…`);
+    $("cancel").onclick = () => socket.emit("cancel_invite", { roomId });
+  });
+
+  socket.on("call_accepted", async ({ roomId: rid, role, mode: m }) => {
+    roomId = rid; mode = m; hideRing();
+    $("peerAvatar").src = currentPeerAvatar;
+    await startCall(role, mode);
+  });
+
+  socket.on("call_declined", () => endCall("Declined"));
+  socket.on("call_cancelled", () => endCall("Cancelled"));
+  socket.on("peer_hangup", () => endCall("Peer hung up"));
+  socket.on("call_error", (e) => endCall(e.error || "Call error"));
+
+  socket.on("signal", async ({ data }) => {
+    if (!pc) return;
+    if (data.type === "offer") {
+      await pc.setRemoteDescription(new RTCSessionDescription(data));
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+      socket.emit("signal", { roomId, data: pc.localDescription });
+    } else if (data.type === "answer") {
+      await pc.setRemoteDescription(new RTCSessionDescription(data));
+    } else if (data.candidate) {
+      try { await pc.addIceCandidate(data); } catch {}
+    }
+  });
+
+  // UI events
+  $("btnAudio").onclick = () => beginRandom("audio");
+  $("btnVideo").onclick = () => beginRandom("video");
+  $("btnCancel").onclick = () => { if (roomId) socket.emit("cancel_invite", { roomId }); $("status").textContent = "Cancelled."; };
+  $("btnLogout").onclick = () => { localStorage.clear(); location.href = "/login"; };
+  $("btnRecharge").onclick = async () => {
+    const amount = prompt("Enter pack (₹100, ₹200, ₹500, ₹1000):");
+    if (!amount) return;
+    try {
+      await api("/api/recharge-request", { phone, amount: Number(amount) });
+      alert("Request sent. Admin will approve.");
+    } catch (e) { alert(e.message); }
+  };
+
+  $("mic").onclick = () => { micOn = !micOn; localStream?.getAudioTracks().forEach(t => t.enabled = micOn); };
+  $("cam").onclick = () => { camOn = !camOn; localStream?.getVideoTracks().forEach(t => t.enabled = camOn); };
+  $("hang").onclick = () => { socket.emit("hangup", { roomId }); endCall("You hung up"); };
+  $("chatSend").onclick = () => {
+    const v = $("chatInput").value.trim();
+    if (!v || !dc || dc.readyState !== "open") return;
+    dc.send(v); addChat("You", v); $("chatInput").value = "";
+  };
 })();
 
-$("logout").onclick=()=>{ localStorage.clear(); location.href="/login"; };
+async function refreshOnline() {
+  const j = await api("/api/online", {});
+  $("online").innerHTML = "";
+  j.online
+    .filter(u => u.phone !== phone)
+    .forEach(u => {
+      const el = document.createElement("div");
+      el.className = "row item";
+      el.innerHTML = `
+        <img src="${u.avatar || ""}" class="avatar" alt="">
+        <div class="grow">
+          <div><b>${u.name}</b> <span class="muted">• ${u.prefs?.language || "-"}</span></div>
+          <div class="muted small">${u.prefs?.location || ""}</div>
+        </div>
+        <button class="small" data-phone="${u.phone}">Call</button>`;
+      el.querySelector("button").onclick = () => beginRandom("video"); // keep same pipeline
+      $("online").appendChild(el);
+    });
+}
 
-$("save").onclick=async()=>{
-  $("status").textContent="Saving...";
-  const body={ phone, gender:$("gender").value, language:$("language").value, location:$("location").value };
-  const r=await fetch("/api/prefs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  const j=await r.json();
-  $("status").textContent = r.ok ? "Saved." : (j.error||"Save failed");
-  // refresh me (for avatar + wallet gating)
-  const r2=await fetch("/api/me",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone})});
-  const m=await r2.json();
-  $("me_avatar").src = m.profile.avatar;
-  $("me_name").textContent = m.profile.name;
-  const g = (m.prefs.gender||"").toLowerCase();
-  if (g==="male"){ $("wallet_male").classList.remove("hide"); $("wallet_female").classList.add("hide"); }
-  else if (g==="female"){ $("wallet_female").classList.remove("hide"); $("wallet_male").classList.add("hide"); }
-};
-
-// Recharge (male)
-document.querySelectorAll(".pack").forEach(btn=>{
-  btn.onclick = async ()=>{
-    const pack = btn.dataset.pack;
-    const r=await fetch("/api/recharge",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone,pack})});
-    const j=await r.json();
-    $("status").textContent = r.ok? `Recharge success: +${j.coinsAdded} coins` : (j.error||"Recharge failed");
-    if (r.ok) $("me_coins").textContent = j.balance;
-  };
-});
-
-// Redeem (female)
-$("redeem").onclick = async ()=>{
-  const amount = Number($("rd_amount").value);
-  const upi = $("rd_upi").value.trim();
-  const r=await fetch("/api/redeem",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone,amount,upi})});
-  const j=await r.json();
-  $("status").textContent = r.ok? `Redeem request placed. New balance: ${j.balance}` : (j.error||"Redeem failed");
-  if (r.ok) $("me_coins").textContent = j.balance;
-};
-
-// Socket + presence
-const socket = io();
-socket.on("connect", ()=> socket.emit("auth",{ phone }));
-socket.on("auth_ok", ()=> { socket.emit("presence_get"); refreshOnline(); });
-
-socket.on("presence", list => renderOnline(list));
-socket.on("status", ({text})=> $("info").textContent=text);
-
-// Render online users
-function renderOnline(list){
-  const box=$("online"); box.innerHTML="";
-  list.filter(u=>u.phone!==phone).forEach(u=>{
-    const emoji = (u.prefs.gender||"").toLowerCase()==="male"?"♂️":(u.prefs.gender||"").toLowerCase()==="female"?"♀️":"🙂";
-    const busy = u.inCall ? " • in call" : (u.ringing ? " • ringing" : "");
-    const row=document.createElement("div");
-    row.className="row";
-    row.innerHTML=`
-      <img src="${u.avatar}" class="avatar sm">
-      <div class="flex1">
-        <div class="bold">${u.name} ${emoji}</div>
-        <div class="muted">${u.prefs.language||"-"} • ${u.prefs.gender||"-"}${busy}</div>
-      </div>
-    `;
-    // (No direct-call button by request; use Random to auto‑match best opposite gender)
-    box.appendChild(row);
+async function refreshHistory() {
+  const j = await api("/api/history", { phone });
+  $("history").innerHTML = "";
+  j.history.forEach(h => {
+    const mins = Math.round(h.ms / 60000);
+    const who = h.aPhone === phone ? h.bPhone : h.aPhone;
+    const el = document.createElement("div");
+    el.className = "row item";
+    el.innerHTML = `<div class="grow">${h.mode} • ${new Date(h.startedAt).toLocaleString()} • ${mins} min • with ${who}</div>`;
+    $("history").appendChild(el);
   });
 }
 
-async function refreshOnline(){
-  const r=await fetch("/api/online"); const j=await r.json(); renderOnline(j.online);
-}
-
-// Random find
-function find(mode){
-  $("info").textContent=`Looking for ${mode} partner...`;
-  socket.emit("find_match",{ mode, phone });
-}
-$("randAudio").onclick=()=> find("audio");
-$("randVideo").onclick=()=> find("video");
-$("cancel").onclick =()=> $("info").textContent="Cancelled.";
-
-/* ----------------------------- WebRTC + Call ---------------------------- */
-let pc=null, localStream=null, role=null, roomId=null, timer=null, startMs=0, peerPic="/avatars/neutral.png";
-
-const remoteAudio = $("remoteAudio");
-
-socket.on("outgoing_call",({roomId:rid,mode,to})=>{
-  role="offerer"; roomId=rid; peerPic=to?.avatar||"/avatars/neutral.png";
-  $("peer_pic").src = peerPic;
-  $("peer_label").textContent = (to?.name||"Friend");
-  $("info").textContent=`Calling ${to?.name||""}...`;
-  startCall(mode);
-});
-socket.on("incoming_call",({roomId:rid,mode,from})=>{
-  role="answerer"; roomId=rid; peerPic=from?.avatar||"/avatars/neutral.png";
-  $("peer_pic").src = peerPic;
-  $("peer_label").textContent = (from?.name||"Friend");
-  $("info").textContent=`Incoming ${mode} call from ${from?.name||""}...`;
-  // auto-accept for now
-  socket.emit("call_accept",{ roomId, phone });
-  startCall(mode);
-});
-socket.on("call_declined",()=> $("info").textContent="Declined.");
-socket.on("call_cancelled",()=> $("info").textContent="Cancelled.");
-
-socket.on("signal",async ({data})=>{
-  if (!pc) return;
-  if (data.type==="offer"){
-    await pc.setRemoteDescription(new RTCSessionDescription(data));
-    const ans=await pc.createAnswer(); await pc.setLocalDescription(ans);
-    socket.emit("signal",{ roomId, data: pc.localDescription });
-  } else if (data.type==="answer"){
-    await pc.setRemoteDescription(new RTCSessionDescription(data));
-  } else if (data.candidate){
-    try{ await pc.addIceCandidate(data);}catch{}
+function beginRandom(m) {
+  mode = m;
+  if (myPrefs.gender === "male" && (me.coins || 0) < 100) {
+    $("status").textContent = "Low balance. Please recharge first.";
+    return;
   }
-});
+  $("status").textContent = `Searching ${m} partner…`;
+  socket.emit("find_match", { phone, mode: m });
+}
 
-// call summary (coins earned for female)
-socket.on("call_summary", ({durationMs, coinsAdded, balance})=>{
-  const mm=String(Math.floor(durationMs/60000)).padStart(2,"0");
-  const ss=String(Math.floor(durationMs/1000)%60).padStart(2,"0");
-  $("summary").textContent = `Duration ${mm}:${ss}` + (coinsAdded? ` • +${coinsAdded} coins` : "");
-  if (typeof balance==="number") $("me_coins").textContent = balance;
-});
+function showRing(t) {
+  $("ringText").textContent = t;
+  $("ring").classList.remove("hidden");
+}
+function hideRing() { $("ring").classList.add("hidden"); }
 
-async function startCall(mode){
-  $("call").classList.remove("hide");
-  $("summary").textContent="";
-  $("me_pic").src = $("me_avatar").src;
+async function startCall(role, m) {
+  hideRing();
+  $("callBox").classList.remove("hidden");
+  $("status").textContent = "In call…";
+  startAt = Date.now();
+  updateTimer(); timerId = setInterval(updateTimer, 1000);
 
-  const audioOnly = mode==="audio";
-  $("videoWrap").style.display = audioOnly ? "none" : "grid";
-
-  const constraints = audioOnly? {audio:true,video:false}:{audio:true,video:true};
+  const constraints = m === "audio" ? { audio: true, video: false } : { audio: true, video: true };
   localStream = await navigator.mediaDevices.getUserMedia(constraints);
-  $("localVideo").srcObject = localStream;
+  $("local").srcObject = localStream;
 
-  pc = new RTCPeerConnection({ iceServers:[{urls:"stun:stun.l.google.com:19302"}] });
-  localStream.getTracks().forEach(t=> pc.addTrack(t, localStream));
-  pc.ontrack = e => {
-    const s=e.streams[0]; if(!s) return;
-    s.getTracks().forEach(tr=>{
-      if(tr.kind==="video"){ $("remoteVideo").srcObject=s; }
-      if(tr.kind==="audio"){ remoteAudio.srcObject=s; }
+  pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  pc.onicecandidate = e => e.candidate && socket.emit("signal", { roomId, data: e.candidate });
+  pc.ontrack = (ev) => {
+    const s = ev.streams[0]; if (!s) return;
+    s.getTracks().forEach(tr => {
+      if (tr.kind === "video") $("remote").srcObject = s;
+      if (tr.kind === "audio") $("remoteAudio").srcObject = s;
     });
   };
-  pc.onicecandidate = e => e.candidate && socket.emit("signal",{ roomId, data:e.candidate });
-  socket.emit("join_room",{ roomId });
 
-  // timer
-  startMs=Date.now();
-  clearInterval(timer);
-  timer=setInterval(()=>{
-    const d=Date.now()-startMs;
-    const mm=String(Math.floor(d/60000)).padStart(2,"0");
-    const ss=String(Math.floor(d/1000)%60).padStart(2,"0");
-    $("timer").textContent = `${mm}:${ss}`;
-  }, 1000);
-
-  if (role==="offerer"){
-    const offer=await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    socket.emit("signal",{ roomId, data: pc.localDescription });
+  if (role === "offerer") {
+    dc = pc.createDataChannel("chat");
+    wireDC(dc);
+    const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+    socket.emit("signal", { roomId, data: pc.localDescription });
+  } else {
+    pc.ondatachannel = (ev) => wireDC(ev.channel);
   }
 }
 
-$("hangup").onclick=()=>{
-  if (roomId) socket.emit("hangup",{ roomId });
-  endCall();
-};
-socket.on("peer_hangup", ()=> endCall());
+function wireDC(ch) {
+  dc = ch;
+  dc.onmessage = (ev) => addChat("Friend", ev.data);
+  addChat("system", "Chat connected");
+}
 
-function endCall(){
-  clearInterval(timer);
-  $("timer").textContent="00:00";
-  $("call").classList.add("hide");
-  try{ pc && pc.close(); }catch{} pc=null;
-  try{ localStream && localStream.getTracks().forEach(t=>t.stop()); }catch{}
-  localStream=null; roomId=null; role=null;
+function addChat(who, msg) {
+  const line = document.createElement("div");
+  line.innerHTML = `<b>${who}:</b> ${msg}`;
+  $("chatLog").appendChild(line);
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+}
+
+function updateTimer() {
+  const s = Math.floor((Date.now() - startAt) / 1000);
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  $("timer").textContent = `${mm}:${ss}`;
+}
+
+function endCall(note) {
+  try { clearInterval(timerId); } catch {}
+  $("callBox").classList.add("hidden");
+  $("status").textContent = note || "Call ended";
+  try { dc && dc.close(); } catch {}
+  try { pc && pc.close(); } catch {}
+  try { localStream && localStream.getTracks().forEach(t => t.stop()); } catch {}
+  dc = pc = localStream = null; roomId = null;
+  api("/api/me", { phone }).then(x => { me = x.profile; $("coins").textContent = `Coins: ${me.coins || 0}`; });
+  refreshHistory();
 }

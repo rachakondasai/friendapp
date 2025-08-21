@@ -1,326 +1,303 @@
+// server.js
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import cors from "cors";
-import { v4 as uuidv4 } from "uuid";
+import path from "path";
+import { fileURLToPath } from "url";
+import crypto from "crypto";
 
-/* ----------------------------- App & Static ----------------------------- */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
-app.use(cors());
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
 app.use(express.json());
-app.use(express.static("public", { extensions: ["html"] }));
+app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/", (req, res) => res.redirect("/login"));
-app.get("/healthz", (req, res) => res.status(200).send("ok"));
+// ---------- In-memory store (swap for DB later) ----------
+const users = new Map();   // phone -> {phone, name, pass, gender, coins, avatar, createdAt}
+const prefs = new Map();   // phone -> {gender, language, location}
+const sessions = new Map();// sessionId -> phone
+const sockets = new Map(); // socket.id -> phone
+const online = new Map();  // phone -> {socketId, available:true}
+const history = [];        // [{aPhone,bPhone,mode,ms,startedAt}]
 
-/* ------------------------------ Data Store ------------------------------ */
-/** Very simple in‑memory demo store (persisted only while process runs) */
-const usersByPhone = new Map(); // phone -> {phone,name,password,gender,language,location,avatar,coins}
-const socketsByPhone = new Map(); // phone -> socketId
-const phoneBySocket = new Map();  // socketId -> phone
-const status = new Map();         // phone -> { inCall:boolean, ringing:boolean }
-
-/** roomId -> { a:phone, b:phone, mode:'audio'|'video', started:boolean, startTs:number|null, joined:Set<phone> } */
-const roomMeta = new Map();
-
-const norm = s => String(s || "").trim().toLowerCase();
-const isOppGender = (a, b) =>
-  (norm(a.gender) === "male" && norm(b.gender) === "female") ||
-  (norm(a.gender) === "female" && norm(b.gender) === "male");
-
-const sameLanguage = (a, b) => {
-  if (!a.language || !b.language) return true;
-  return norm(a.language) === norm(b.language);
+// ---------- Constants ----------
+const AVATAR_URLS = {
+  male:   "https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f9d1.svg",
+  female: "https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f469.svg",
+  default:"https://images.emojiterra.com/google/noto-emoji/unicode-16.0/color/svg/1f642.svg"
 };
-const setAvail = (phone, patch) => {
-  const curr = status.get(phone) || { inCall: false, ringing: false };
-  status.set(phone, { ...curr, ...patch });
+const COINS_PACKS = { 100: 1000, 200: 2000, 500: 5500, 1000: 12000 };
+const COST_PER_CALL = 100;         // male must have at least this to start a call
+const FEMALE_EARN_PER_5MIN = 500;  // coins per full 5 minutes call
+
+// ---------- Helpers ----------
+const sid = () => crypto.randomBytes(16).toString("hex");
+const now = () => new Date().toISOString();
+const setAvatarForUser = (phone, gender) => {
+  const u = users.get(phone);
+  if (!u) return;
+  const g = (gender || u.gender || "").toLowerCase();
+  u.avatar = AVATAR_URLS[g] || AVATAR_URLS.default;
 };
 
-/* ------------------------------- REST API ------------------------------- */
+// ---------- Routes (pages) ----------
+app.get("/", (_req, res) => res.redirect("/welcome"));
+app.get("/welcome",  (_req,res)=>res.sendFile(path.join(__dirname,"public/welcome.html")));
+app.get("/signup",   (_req,res)=>res.sendFile(path.join(__dirname,"public/signup.html")));
+app.get("/login",    (_req,res)=>res.sendFile(path.join(__dirname,"public/login.html")));
+app.get("/prefs",    (_req,res)=>res.sendFile(path.join(__dirname,"public/prefs.html")));
+app.get("/dashboard",(_req,res)=>res.sendFile(path.join(__dirname,"public/dashboard.html")));
+app.get("/healthz",  (_req,res)=>res.type("text").send("ok"));
 
-// Sign up
+// ---------- Auth & Profile ----------
 app.post("/api/signup", (req, res) => {
   const { phone, name, password } = req.body || {};
-  if (!phone || !name || !password) return res.status(400).json({ error: "All fields required" });
-  if (usersByPhone.has(phone)) return res.status(409).json({ error: "Phone already exists" });
-
-  usersByPhone.set(phone, {
-    phone, name, password,
-    gender: "", language: "", location: "",
-    avatar: "/avatars/neutral.png",
-    coins: 0
-  });
-
-  console.log(`👤 SIGNUP phone=${phone} name=${name}`);
+  if (!phone || !name || !password) return res.status(400).json({ error:"Missing fields" });
+  if (users.has(phone)) return res.status(409).json({ error:"Phone already registered" });
+  users.set(phone, { phone, name, pass: password, gender: "", avatar: AVATAR_URLS.default, coins: 0, createdAt: now() });
+  console.log("🆕 signup:", phone, name);
   return res.json({ ok: true });
 });
 
-// Login
 app.post("/api/login", (req, res) => {
   const { phone, password } = req.body || {};
-  const u = usersByPhone.get(phone);
-  if (!u || u.password !== password) return res.status(401).json({ error: "Invalid credentials" });
-  console.log(`✅ LOGIN phone=${phone} name=${u.name}`);
-  return res.json({ ok: true, profile: { phone: u.phone, name: u.name } });
+  const u = users.get(phone);
+  if (!u || u.pass !== password) return res.status(401).json({ error:"Invalid credentials" });
+  const sessionId = sid();
+  sessions.set(sessionId, phone);
+  console.log("🔓 login:", phone);
+  return res.json({ ok: true, sessionId, profile: { name: u.name, phone: u.phone } });
 });
 
-// Reset password (simple demo: phone + newPassword)
 app.post("/api/reset", (req, res) => {
   const { phone, newPassword } = req.body || {};
-  const u = usersByPhone.get(phone);
-  if (!u) return res.status(404).json({ error: "User not found" });
-  if (!newPassword) return res.status(400).json({ error: "New password required" });
-  u.password = newPassword;
-  console.log(`🔑 RESET password phone=${phone}`);
+  const u = users.get(phone);
+  if (!u) return res.status(404).json({ error:"No such user" });
+  u.pass = newPassword;
+  console.log("🔁 password reset:", phone);
   return res.json({ ok: true });
 });
 
-// Save preferences
-app.post("/api/prefs", (req, res) => {
-  const { phone, gender, language, location } = req.body || {};
-  const u = usersByPhone.get(phone);
-  if (!u) return res.status(404).json({ error: "User not found" });
-
-  if (gender !== undefined) u.gender = gender;
-  if (language !== undefined) u.language = language;
-  if (location !== undefined) u.location = location;
-
-  // auto avatar by gender
-  const g = norm(u.gender);
-  if (g === "male") u.avatar = "/avatars/male.png";
-  else if (g === "female") u.avatar = "/avatars/female.png";
-  else u.avatar = "/avatars/neutral.png";
-
-  console.log(`🛠️ PREFS phone=${phone} gender=${u.gender} lang=${u.language} loc=${u.location}`);
-  return res.json({ ok: true });
-});
-
-// Current user
 app.post("/api/me", (req, res) => {
   const { phone } = req.body || {};
-  const u = usersByPhone.get(phone);
-  if (!u) return res.status(404).json({ error: "Not found" });
-  const emoji = norm(u.gender) === "male" ? "♂️" : norm(u.gender) === "female" ? "♀️" : "🙂";
-  return res.json({
-    profile: { name: `${u.name} ${emoji}`, phone: u.phone, avatar: u.avatar },
-    prefs: { gender: u.gender, language: u.language, location: u.location },
-    wallet: { coins: u.coins }
-  });
+  const u = users.get(phone);
+  if (!u) return res.status(404).json({ error:"Not found" });
+  return res.json({ profile: u, prefs: prefs.get(phone) || {}, coins: u.coins });
 });
 
-// Online users
-app.get("/api/online", (req, res) => {
-  const online = [...usersByPhone.values()]
-    .filter(u => socketsByPhone.has(u.phone))
-    .map(u => ({
-      phone: u.phone,
-      name: u.name,
-      avatar: u.avatar,
-      prefs: { gender: u.gender, language: u.language, location: u.location },
-      inCall: !!(status.get(u.phone)?.inCall),
-      ringing: !!(status.get(u.phone)?.ringing)
-    }));
-  res.json({ online });
+app.post("/api/prefs", (req, res) => {
+  const { phone, gender, language, location } = req.body || {};
+  if (!users.has(phone)) return res.status(404).json({ error:"No such user" });
+  if (!gender || !language) return res.status(400).json({ error:"Gender & language required" });
+  prefs.set(phone, { gender, language, location });
+  const u = users.get(phone);
+  u.gender = gender;
+  setAvatarForUser(phone, gender);
+  console.log("⚙️  prefs set:", phone, JSON.stringify(prefs.get(phone)));
+  return res.json({ ok: true, avatar: users.get(phone).avatar });
 });
 
-// Coins: recharge (male only)
-app.post("/api/recharge", (req, res) => {
-  const { phone, pack } = req.body || {};
-  const u = usersByPhone.get(phone);
-  if (!u) return res.status(404).json({ error: "User not found" });
-  if (norm(u.gender) !== "male") return res.status(403).json({ error: "Only male users can recharge" });
+// ---------- Coins / Recharge (mock) ----------
+app.post("/api/recharge-request", (req, res) => {
+  const { phone, amount } = req.body || {};
+  const u = users.get(phone);
+  if (!u) return res.status(404).json({ error:"No such user" });
+  const coins = COINS_PACKS[amount];
+  if (!coins) return res.status(400).json({ error:"Invalid pack" });
+  console.log(`💳 RECHARGE REQUEST phone=${phone} amount=₹${amount} -> coins=${coins} (pending admin)`);
+  return res.json({ ok: true, note: "Recharge request logged. Admin will approve." });
+});
 
-  const packs = {
-    "100": 1000,
-    "200": 2200,
-    "500": 6000
-  };
-  const coins = packs[String(pack)];
-  if (!coins) return res.status(400).json({ error: "Invalid pack" });
-
+// (demo) admin approval endpoint (you can comment out in real prod)
+app.post("/api/admin/approve-recharge", (req, res) => {
+  const { phone, amount } = req.body || {};
+  const u = users.get(phone);
+  if (!u) return res.status(404).json({ error:"No such user" });
+  const coins = COINS_PACKS[amount];
+  if (!coins) return res.status(400).json({ error:"Invalid pack" });
   u.coins += coins;
-  console.log(`💳 RECHARGE phone=${phone} pack=₹${pack} +${coins} coins -> balance=${u.coins}`);
-  return res.json({ ok: true, coinsAdded: coins, balance: u.coins });
-});
-
-// Coins: redeem (female only)
-app.post("/api/redeem", (req, res) => {
-  const { phone, amount, upi } = req.body || {};
-  const u = usersByPhone.get(phone);
-  if (!u) return res.status(404).json({ error: "User not found" });
-  if (norm(u.gender) !== "female") return res.status(403).json({ error: "Only female users can redeem" });
-
-  const amt = Math.max(0, Math.floor(Number(amount || 0)));
-  if (!amt) return res.status(400).json({ error: "Amount required" });
-  if (!upi) return res.status(400).json({ error: "UPI id required" });
-  if (amt > u.coins) return res.status(400).json({ error: "Insufficient coins" });
-
-  u.coins -= amt;
-  console.log(`🏧 REDEEM phone=${phone} -${amt} coins to ${upi} -> balance=${u.coins}`);
+  console.log(`✅ ADMIN APPROVED: ${phone} +${coins} coins (₹${amount}) -> balance=${u.coins}`);
   return res.json({ ok: true, balance: u.coins });
 });
 
-/* ---------------------------- Socket + Calling --------------------------- */
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+// ---------- Presence & History ----------
+app.post("/api/online", (_req, res) => {
+  const list = Array.from(online.keys()).map(p => {
+    const u = users.get(p);
+    return {
+      phone: p,
+      name: u?.name || p,
+      gender: u?.gender || "",
+      avatar: u?.avatar || AVATAR_URLS.default,
+      coins: u?.coins || 0,
+      prefs: prefs.get(p) || {}
+    };
+  });
+  res.json({ online: list });
+});
 
-function broadcastPresence() {
-  const list = [...usersByPhone.values()]
-    .filter(u => socketsByPhone.has(u.phone))
-    .map(u => ({
-      phone: u.phone,
-      name: u.name,
-      avatar: u.avatar,
-      prefs: { gender: u.gender, language: u.language, location: u.location },
-      inCall: !!(status.get(u.phone)?.inCall),
-      ringing: !!(status.get(u.phone)?.ringing)
-    }));
-  io.emit("presence", list);
-}
+app.post("/api/history", (req, res) => {
+  const { phone } = req.body || {};
+  const list = history.filter(h => h.aPhone === phone || h.bPhone === phone).slice(-50).reverse();
+  res.json({ history: list });
+});
 
-function pickOpponent(seekerPhone) {
-  const seeker = usersByPhone.get(seekerPhone);
-  if (!seeker) return null;
-  const candidates = [...usersByPhone.values()].filter(u =>
-    u.phone !== seekerPhone &&
-    socketsByPhone.has(u.phone) &&
-    !status.get(u.phone)?.inCall &&
-    !status.get(u.phone)?.ringing &&
-    isOppGender(seeker, u) &&
-    sameLanguage(seeker, u)
-  );
-  if (!candidates.length) return null;
-  return candidates[Math.floor(Math.random() * candidates.length)];
-}
+// ---------- WebSocket: ringing/matching/signaling ----------
+const roomMeta = new Map(); // roomId -> {aPhone,bPhone,mode,startAt}
 
 io.on("connection", (socket) => {
   socket.on("auth", ({ phone }) => {
-    const u = usersByPhone.get(phone);
-    if (!u) { socket.emit("auth_error", { error: "Unknown user" }); return; }
-    socketsByPhone.set(phone, socket.id);
-    phoneBySocket.set(socket.id, phone);
-    setAvail(phone, { inCall: false, ringing: false });
-    socket.emit("auth_ok");
-    broadcastPresence();
-  });
-
-  socket.on("presence_get", () => broadcastPresence());
-
-  // Random match -> ring an opposite-gender user who is online and free
-  socket.on("find_match", ({ mode, phone }) => {
-    const seeker = usersByPhone.get(phone);
-    if (!seeker) return;
-
-    console.log(`🔎 MATCH_REQ phone=${phone} mode=${mode} gender=${seeker.gender} lang=${seeker.language}`);
-
-    const target = pickOpponent(phone);
-    if (!target) {
-      socket.emit("status", { text: "No suitable online partner right now." });
-      return;
-    }
-
-    const roomId = uuidv4();
-    const sSock = socketsByPhone.get(seeker.phone);
-    const tSock = socketsByPhone.get(target.phone);
-
-    roomMeta.set(roomId, {
-      a: seeker.phone, b: target.phone, mode,
-      started: false, startTs: null, joined: new Set()
-    });
-
-    setAvail(seeker.phone, { ringing: true });
-    setAvail(target.phone, { ringing: true });
-
-    io.to(sSock).emit("outgoing_call", { roomId, mode, to: target });
-    io.to(tSock).emit("incoming_call", { roomId, mode, from: seeker });
-
-    console.log(`📞 RING from=${seeker.phone} -> to=${target.phone} mode=${mode} room=${roomId}`);
-    broadcastPresence();
-  });
-
-  socket.on("call_accept", ({ roomId }) => {
-    const phone = phoneBySocket.get(socket.id);
-    setAvail(phone, { inCall: true, ringing: false });
-    socket.emit("call_accepted", { roomId, role: "answerer" });
-    console.log(`✅ ACCEPT phone=${phone} room=${roomId}`);
-    broadcastPresence();
-  });
-
-  socket.on("call_decline", ({ roomId }) => {
-    const phone = phoneBySocket.get(socket.id);
-    setAvail(phone, { ringing: false });
-    socket.broadcast.emit("call_declined", { roomId });
-    console.log(`❌ DECLINE phone=${phone} room=${roomId}`);
-    broadcastPresence();
-  });
-
-  socket.on("cancel_invite", ({ roomId }) => {
-    const phone = phoneBySocket.get(socket.id);
-    setAvail(phone, { ringing: false });
-    socket.broadcast.emit("call_cancelled", { roomId });
-    console.log(`🚫 CANCEL phone=${phone} room=${roomId}`);
-    broadcastPresence();
-  });
-
-  socket.on("join_room", ({ roomId }) => {
-    const meta = roomMeta.get(roomId);
-    if (!meta) return;
-    const phone = phoneBySocket.get(socket.id);
-    meta.joined.add(phone);
-    socket.join(roomId);
-    if (!meta.started && meta.joined.has(meta.a) && meta.joined.has(meta.b)) {
-      meta.started = true; meta.startTs = Date.now();
-      console.log(`🎬 CALL_START room=${roomId} a=${meta.a} b=${meta.b} mode=${meta.mode}`);
-      setAvail(meta.a, { inCall: true, ringing: false });
-      setAvail(meta.b, { inCall: true, ringing: false });
-      broadcastPresence();
-    }
-  });
-
-  socket.on("signal", ({ roomId, data }) => socket.to(roomId).emit("signal", { data }));
-
-  socket.on("hangup", ({ roomId }) => {
-    const meta = roomMeta.get(roomId);
-    const who = phoneBySocket.get(socket.id);
-    if (meta) {
-      const durMs = meta.startTs ? Date.now() - meta.startTs : 0;
-      const mins = Math.floor(durMs / 60000);
-      const coinsPerMin = 100; // 5 min => 500 coins
-      // Award females only
-      [meta.a, meta.b].forEach(ph => {
-        const u = usersByPhone.get(ph);
-        if (u && norm(u.gender) === "female" && mins > 0) {
-          const add = mins * coinsPerMin;
-          u.coins += add;
-          const sock = socketsByPhone.get(ph);
-          io.to(sock).emit("call_summary", { durationMs: durMs, coinsAdded: add, balance: u.coins });
-          console.log(`💠 COINS phone=${ph} +${add} (mins=${mins}) -> balance=${u.coins}`);
-        }
-      });
-      console.log(`🏁 CALL_END room=${roomId} duration=${Math.round(durMs/1000)}s endedBy=${who}`);
-      roomMeta.delete(roomId);
-      setAvail(meta.a, { inCall: false, ringing: false });
-      setAvail(meta.b, { inCall: false, ringing: false });
-      io.to(roomId).emit("peer_hangup");
-      broadcastPresence();
-    }
+    if (!users.has(phone)) return;
+    sockets.set(socket.id, phone);
+    online.set(phone, { socketId: socket.id, available: true });
+    console.log("🟢 online:", phone);
+    socket.emit("presence", Array.from(online.keys()));
+    socket.broadcast.emit("presence", Array.from(online.keys()));
   });
 
   socket.on("disconnect", () => {
-    const phone = phoneBySocket.get(socket.id);
+    const phone = sockets.get(socket.id);
     if (phone) {
-      socketsByPhone.delete(phone);
-      phoneBySocket.delete(socket.id);
-      setAvail(phone, { inCall: false, ringing: false });
-      console.log(`🔌 DISCONNECT phone=${phone}`);
-      broadcastPresence();
+      online.delete(phone);
+      sockets.delete(socket.id);
+      console.log("🔴 offline:", phone);
+      socket.broadcast.emit("presence", Array.from(online.keys()));
     }
+  });
+
+  // Random match request (opposite gender + same language)
+  socket.on("find_match", async ({ phone, mode }) => {
+    const me = users.get(phone);
+    if (!me) return;
+    const myPrefs = prefs.get(phone) || {};
+    if (!myPrefs.gender || !myPrefs.language) {
+      socket.emit("find_error", { error: "Set gender & language first" });
+      return;
+    }
+    // male must have coins before starting
+    if (myPrefs.gender === "male" && me.coins < COST_PER_CALL) {
+      socket.emit("find_error", { error: "Low balance. Recharge required." });
+      return;
+    }
+    // find opposite-gender online with same language
+    const target = Array.from(online.keys()).find(p => {
+      if (p === phone) return false;
+      const pp = prefs.get(p) || {};
+      return pp.gender && pp.gender !== myPrefs.gender && pp.language === myPrefs.language;
+    });
+    if (!target) {
+      socket.emit("find_error", { error: "No opposite‑gender partner online in your language" });
+      return;
+    }
+
+    const roomId = sid();
+    const toSock = online.get(target)?.socketId;
+    if (!toSock) { socket.emit("find_error", { error: "Peer went offline" }); return; }
+
+    socket.join(roomId);
+    io.to(toSock).emit("incoming_call", {
+      roomId,
+      mode,
+      from: { phone, name: me.name, avatar: me.avatar }
+    });
+    io.to(socket.id).emit("outgoing_call", {
+      roomId,
+      mode,
+      to: { phone: target, name: users.get(target)?.name, avatar: users.get(target)?.avatar }
+    });
+
+    roomMeta.set(roomId, { aPhone: phone, bPhone: target, mode, startAt: 0 });
+    console.log(`📞 ring room=${roomId} ${phone} -> ${target} (${mode})`);
+  });
+
+  socket.on("call_accept", ({ roomId }) => {
+    const meta = roomMeta.get(roomId); if (!meta) return;
+    const { aPhone, bPhone, mode } = meta;
+    const aSock = online.get(aPhone)?.socketId;
+    const bSock = online.get(bPhone)?.socketId;
+
+    // Re-check male coins on accept (final guard)
+    const pa = prefs.get(aPhone)?.gender, pb = prefs.get(bPhone)?.gender;
+    const male = pa === "male" ? aPhone : (pb === "male" ? bPhone : null);
+    if (male && users.get(male).coins < COST_PER_CALL) {
+      if (aSock) io.to(aSock).emit("call_error", { error: "Low balance" });
+      if (bSock) io.to(bSock).emit("call_error", { error: "Peer has low balance" });
+      return;
+    }
+    if (male) users.get(male).coins -= COST_PER_CALL;
+
+    if (aSock) io.to(aSock).emit("call_accepted", { roomId, role: "offerer", mode });
+    if (bSock) io.to(bSock).emit("call_accepted", { roomId, role: "answerer", mode });
+    roomMeta.get(roomId).startAt = Date.now();
+
+    console.log(`✅ accept room=${roomId} ${aPhone} <-> ${bPhone} (${mode})`);
+  });
+
+  socket.on("call_decline", ({ roomId }) => {
+    const meta = roomMeta.get(roomId); if (!meta) return;
+    const { aPhone, bPhone } = meta;
+    const aSock = online.get(aPhone)?.socketId;
+    const bSock = online.get(bPhone)?.socketId;
+    if (aSock) io.to(aSock).emit("call_declined");
+    if (bSock) io.to(bSock).emit("call_declined");
+    roomMeta.delete(roomId);
+    console.log(`❌ decline room=${roomId} ${aPhone} / ${bPhone}`);
+  });
+
+  socket.on("cancel_invite", ({ roomId }) => {
+    const meta = roomMeta.get(roomId); if (!meta) return;
+    const { aPhone, bPhone } = meta;
+    const aSock = online.get(aPhone)?.socketId;
+    const bSock = online.get(bPhone)?.socketId;
+    if (aSock) io.to(aSock).emit("call_cancelled");
+    if (bSock) io.to(bSock).emit("call_cancelled");
+    roomMeta.delete(roomId);
+    console.log(`↩️ cancel ring room=${roomId}`);
+  });
+
+  // WebRTC signaling passthrough
+  socket.on("signal", ({ roomId, data }) => {
+    const meta = roomMeta.get(roomId); if (!meta) return;
+    const me = sockets.get(socket.id);
+    const peer = me === meta.aPhone ? meta.bPhone : meta.aPhone;
+    const peerSock = online.get(peer)?.socketId;
+    if (peerSock) io.to(peerSock).emit("signal", { data });
+  });
+
+  // Hangup → record history, female earnings
+  socket.on("hangup", ({ roomId }) => {
+    const meta = roomMeta.get(roomId); if (!meta) return;
+    const { aPhone, bPhone, mode, startAt } = meta;
+    const dur = Math.max(0, Date.now() - (startAt || Date.now()));
+    history.push({ aPhone, bPhone, mode, ms: dur, startedAt: new Date(startAt).toISOString() });
+
+    const aSock = online.get(aPhone)?.socketId;
+    const bSock = online.get(bPhone)?.socketId;
+    if (aSock) io.to(aSock).emit("peer_hangup");
+    if (bSock) io.to(bSock).emit("peer_hangup");
+
+    const pa = prefs.get(aPhone)?.gender, pb = prefs.get(bPhone)?.gender;
+    const female = pa === "female" ? aPhone : (pb === "female" ? bPhone : null);
+    if (female) {
+      const blocks = Math.floor(dur / (5 * 60 * 1000));
+      const earn = blocks * FEMALE_EARN_PER_5MIN;
+      if (earn > 0) {
+        users.get(female).coins += earn;
+        console.log(`💜 female-earn ${female} +${earn} coins for ${Math.round(dur/1000)}s`);
+      }
+    }
+
+    roomMeta.delete(roomId);
+    console.log(`☎️  hangup room=${roomId} dur=${Math.round(dur/1000)}s ${aPhone}<->${bPhone}`);
   });
 });
 
-/* ------------------------------- Start App ------------------------------ */
+// ---------- Start ----------
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, () => {
   console.log(`✅ FriendApp running on port ${PORT}`);
 });
