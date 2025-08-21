@@ -2,35 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>FriendApp — Login</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <link rel="stylesheet" href="/ui.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Login — FriendApp</title>
+  <link rel="stylesheet" href="/ui.css"/>
 </head>
-<body class="bg">
-  <main class="card w-3xl">
-    <header class="card-h">
-      <h1>🔐 Login</h1>
-      <a href="/signup.html" class="link">Create account</a>
-    </header>
-    <section class="grid2">
-      <input id="phone" placeholder="Phone" class="in">
-      <input id="password" placeholder="Password" type="password" class="in">
-      <button id="btn_login" class="btn btn-green col2">Login</button>
-      <div class="col2 right"><a href="/reset.html" class="link">Forgot password?</a></div>
-      <div id="status" class="err col2"></div>
-    </section>
-  </main>
-  <script>
-    const $=id=>document.getElementById(id);
-    const api=async(p,b)=>{const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(!r.ok)throw new Error((await r.json()).error||'Failed');return r.json();};
-    $('btn_login').onclick=async()=>{
-      $('status').textContent='';
+<body class="wrap">
+  <div class="card">
+    <h2>🔐 Login</h2>
+    <div class="grid">
+      <input id="phone" placeholder="Phone"/>
+      <input id="password" type="password" placeholder="Password"/>
+      <button id="go" class="btn">Login</button>
+    </div>
+    <p id="msg"></p>
+    <p class="muted">No account? <a href="/signup.html">Create one</a></p>
+  </div>
+  <script type="module">
+    const $ = (id)=>document.getElementById(id);
+    const api = async (p,b)=>{
+      const r = await fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})});
+      if(!r.ok) throw new Error((await r.json()).error||"Request failed"); return r.json();
+    };
+    $("go").onclick = async ()=>{
+      $("msg").textContent="";
       try{
-        const {token, profile} = await api('/api/login',{phone:$('phone').value.trim(), password:$('password').value});
-        localStorage.setItem('fa_token', token);
-        if(!profile.gender || !profile.language) location.href='/setup.html';
-        else location.href='/dashboard.html';
-      }catch(e){$('status').textContent=e.message;}
+        const r = await api("/api/login",{phone:$("phone").value, password:$("password").value});
+        localStorage.setItem("fa_token", r.token);
+        location.href="/dashboard.html";
+      }catch(e){ $("msg").textContent = e.message; }
     };
   </script>
 </body>
