@@ -279,10 +279,6 @@ function getAutoAvatar(name="User"){
   return `https://api.dicebear.com/7.x/thumbs/svg?seed=${initial}`;
 }
 
-server.listen(PORT, ()=> console.log(`✅ FriendApp running on port ${PORT}`));
-
-// -------- Start server ----------
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
-  console.log("✅ FriendApp running on port", PORT);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ FriendApp running on port ${PORT}`);
 });
