@@ -1,2 +1,52 @@
-<!DOCTYPE html>
-<html><body><h1>Dashboard</h1></body></html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/app.css"/>
+  <title>FriendApp — Dashboard</title>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="header">
+      <div class="title">👋 FriendApp</div>
+      <div><a href="/settings">Settings</a> · <a href="#" id="logout">Logout</a></div>
+    </div>
+
+    <div class="row mb-2">
+      <button id="btn_audio" class="btn">🎤 Random Audio</button>
+      <button id="btn_video" class="btn green">📹 Random Video</button>
+      <button id="btn_cancel" class="btn gray">Cancel</button>
+    </div>
+    <div id="status" class="mb-2">Waiting…</div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div><b>Online users</b> (tap to call)</div>
+        <div id="online" class="list mt-2"></div>
+      </div>
+
+      <div class="card">
+        <div class="center"><b>Call</b> <span id="timer">00:00</span></div>
+        <div class="mt-2">
+          <video id="localVideo" autoplay playsinline muted style="width:100%;border-radius:12px;background:#000"></video>
+          <video id="remoteVideo" autoplay playsinline style="width:100%;border-radius:12px;background:#000" class="mt-2"></video>
+          <audio id="remoteAudio" autoplay></audio>
+        </div>
+        <div class="row mt-3">
+          <button id="btn_mic" class="btn gray grow">Mic</button>
+          <button id="btn_cam" class="btn gray grow">Camera</button>
+          <button id="btn_hang" class="btn red grow">Hang Up</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<audio id="tone_out" src="/sounds/ring-out.mp3" preload="auto"></audio>
+<audio id="tone_in"  src="/sounds/ring-in.mp3" preload="auto" loop></audio>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/call.js"></script>
+</body>
+</html>

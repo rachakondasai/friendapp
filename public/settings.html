@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/app.css"/>
+  <title>FriendApp — Settings</title>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="header">
+      <div class="title">⚙️ Settings</div>
+      <div><a href="/dashboard" class="mr">Dashboard</a> · <a href="#" id="logout">Logout</a></div>
+    </div>
+    <div id="who" class="mb-2"></div>
+    <div class="grid-2">
+      <select id="gender" class="select">
+        <option value="">Select gender</option>
+        <option>Male</option><option>Female</option>
+      </select>
+      <input id="lang" class="input" placeholder="Language (e.g., Telugu)"/>
+      <input id="loc" class="input" placeholder="City (optional)"/>
+      <button id="save" class="btn">Save</button>
+    </div>
+    <div id="msg" class="mt-2"></div>
+  </div>
+</div>
+<script type="module">
+import { getToken, post, logout, me } from '/ui.js';
+const gender = document.getElementById('gender'), lang = document.getElementById('lang'), loc = document.getElementById('loc');
+const who = document.getElementById('who'), msg = document.getElementById('msg');
+if (!getToken()) location.href='/login';
+document.getElementById('logout').onclick = () => logout();
+document.getElementById('save').onclick = async () => {
+  try { await post('/api/prefs',{ token:getToken(), gender:gender.value, language:lang.value, location:loc.value }); msg.textContent='Saved'; }
+  catch(e){ msg.textContent=e.message || 'Error'; }
+};
+(async () => {
+  const m = await me(); who.textContent = `Logged in as ${m.profile.name} (${m.profile.phone})`;
+  gender.value = m.prefs.gender || ""; lang.value = m.prefs.language || ""; loc.value = m.prefs.location || "";
+})();
+</script>
+</body>
+</html>

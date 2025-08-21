@@ -1,2 +1,37 @@
-<!DOCTYPE html>
-<html><body><h1>Login Page</h1></body></html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/app.css"/>
+  <title>FriendApp — Login</title>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="header">
+      <div class="title">🔐 Login</div>
+      <a href="/signup">Create account</a>
+    </div>
+    <div class="grid-2">
+      <input id="phone" class="input" placeholder="Phone"/>
+      <input id="password" type="password" class="input" placeholder="Password"/>
+      <div></div>
+      <button id="login" class="btn green">Login</button>
+    </div>
+    <div id="msg" class="mt-3"></div>
+  </div>
+</div>
+<script type="module">
+import { post, saveToken } from '/ui.js';
+const phone = document.getElementById('phone'), pw = document.getElementById('password'), msg=document.getElementById('msg');
+document.getElementById('login').onclick = async () => {
+  try {
+    const r = await post('/api/login', { phone: phone.value.trim(), password: pw.value });
+    saveToken(r.token); location.href = '/dashboard';
+  } catch(e) { msg.textContent = e.message || 'Login failed'; }
+};
+</script>
+</body>
+</html>

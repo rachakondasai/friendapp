@@ -1,0 +1,16 @@
+{
+  "name": "FriendApp",
+  "short_name": "FriendApp",
+  "start_url": "/login",
+  "display": "standalone",
+  "background_color": "#0b1224",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "https://cdn.jsdelivr.net/gh/edent/SuperTinyIcons/images/png/hand.png",
+      "sizes": "196x196",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
