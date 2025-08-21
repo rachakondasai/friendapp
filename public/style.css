@@ -9,7 +9,7 @@
 .layout{display:grid;grid-template-columns:280px 1fr;gap:20px;padding:24px}
 .side{border:1px solid #334155;border-radius:16px;background:#111827;padding:16px}
 .me{display:flex;gap:12px;align-items:center;margin-bottom:12px}
-.avatar{width:48px;height:48px;border-radius:999px;border:1px solid #334155}
+.avatar{width:36px;height:36px;border-radius:50%;border:1px solid #ffffff22;background:#0f172a}
 .avatar.sm{width:32px;height:32px}
 .bold{font-weight:700}
 .muted{opacity:.7;font-size:14px}
