@@ -6,12 +6,12 @@ const $ = (id)=>document.getElementById(id);
 $("me_name").textContent = name || "User";
 $("me_phone").textContent = phone;
 
-// load profile/prefs
 (async ()=>{
   try{
     const r=await fetch("/api/me",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({phone})});
     const j=await r.json();
     $("me_avatar").src=j.profile.avatar;
+    $("me_name").textContent = j.profile.name; // includes emoji from server
     $("gender").value = j.prefs.gender || "";
     $("language").value = j.prefs.language || "";
     $("location").value = j.prefs.location || "";
@@ -28,20 +28,23 @@ $("save").onclick=async()=>{
   $("status").textContent = r.ok ? "Saved." : (j.error||"Save failed");
 };
 
-// socket
+// socket + presence
 const socket = io();
 socket.on("connect", ()=> socket.emit("auth",{ phone }));
 socket.on("auth_ok", ()=> { socket.emit("presence_get"); refreshOnline(); });
+socket.on("status", ({text})=> $("status").textContent=text);
 
 socket.on("presence", list => renderOnline(list));
 
 function renderOnline(list){
   const box=$("online"); box.innerHTML="";
   list.filter(u=>u.phone!==phone).forEach(u=>{
+    const emoji = (u.prefs.gender||"").toLowerCase()==="male"?"♂️":(u.prefs.gender||"").toLowerCase()==="female"?"♀️":"🙂";
+    const busy = u.inCall ? " • in call" : (u.ringing ? " • ringing" : "");
     const d=document.createElement("div");
     d.className="row";
-    d.innerHTML=`<img src="${u.avatar}" class="avatar sm"><div class="flex1"><div class="bold">${u.name}</div><div class="muted">${u.prefs.language||"-"} • ${u.prefs.gender||"-"}</div></div><button>Call</button>`;
-    d.querySelector("button").onclick=()=> directCall(u.phone);
+    d.innerHTML=`<img src="${u.avatar}" class="avatar sm"><div class="flex1"><div class="bold">${u.name} ${emoji}</div><div class="muted">${u.prefs.language||"-"} • ${u.prefs.gender||"-"}${busy}</div></div><button ${u.inCall?"disabled":""}>Call</button>`;
+    d.querySelector("button").onclick=()=> $("status").textContent="Tip: Random will auto pick a best match.";
     box.appendChild(d);
   });
 }
@@ -51,18 +54,14 @@ async function refreshOnline(){
 }
 
 function find(mode){
-  $("status").textContent=`Waiting for ${mode} partner...`;
+  $("status").textContent=`Looking for ${mode} partner...`;
   socket.emit("find_match",{ mode, phone });
 }
 $("randAudio").onclick=()=> find("audio");
 $("randVideo").onclick=()=> find("video");
-$("cancel").onclick =()=> socket.emit("cancel_find",{ mode:"audio", phone });
+$("cancel").onclick =()=> $("status").textContent="Cancelled.";
 
-function directCall(targetPhone){
-  // simple: random path also covers ringing. For direct we can reuse queue or later add direct; here just show status.
-  $("status").textContent="(Tip) Random will connect you faster.";
-}
-
+// ---- calling (unchanged) ----
 let pc=null, localStream=null, role=null, roomId=null;
 const remoteAudio = $("remoteAudio");
 
@@ -73,7 +72,8 @@ socket.on("outgoing_call",({roomId:rid,mode,to})=>{
 });
 socket.on("incoming_call",({roomId:rid,mode,from})=>{
   role="answerer"; roomId=rid;
-  $("status").textContent=`Incoming ${mode} call from ${from?.name||""}... auto-accepting for demo`;
+  $("status").textContent=`Incoming ${mode} call from ${from?.name||""}...`;
+  // show accept/decline UI if you want; for now auto-accept:
   socket.emit("call_accept",{ roomId, phone });
   startCall(mode);
 });

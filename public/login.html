@@ -8,10 +8,15 @@
 </head>
 <body>
   <div class="card">
-    <h1>🔐 Login <a class="right" href="/signup">Create account</a></h1>
+    <h1>🔐 Login
+      <a class="right" href="/signup">Create account</a>
+    </h1>
     <input id="phone" placeholder="Phone" />
     <input id="password" type="password" placeholder="Password" />
     <button id="loginBtn">Login</button>
+    <p class="muted" style="margin-top:8px">
+      <a href="/reset">Forgot password?</a>
+    </p>
     <p id="msg" class="msg"></p>
   </div>
   <script>
@@ -19,7 +24,10 @@
     $("loginBtn").onclick = async () => {
       $("msg").textContent = "";
       try {
-        const r = await fetch("/api/login", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ phone:$("phone").value.trim(), password:$("password").value }) });
+        const r = await fetch("/api/login", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({ phone:$("phone").value.trim(), password:$("password").value })
+        });
         const j = await r.json(); if(!r.ok) throw new Error(j.error||"Login failed");
         localStorage.setItem("phone", j.profile.phone);
         localStorage.setItem("name", j.profile.name);
